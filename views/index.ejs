@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="X-UA-Compatible" content="ie=edge" />
+    <title>Document</title>
+    <script src="/socket.io/socket.io.js"></script>
+  </head>
+
+  <body>
+    ok
+    <button id="call">call</button>
+    <button id="camera">open camera</button>
+    <div id="meet"></div>
+
+    <input type="txt" id="number" />
+    <button id="join">join</button>
+
+    <h1>local stream</h1>
+    <video
+      id="localStream"
+      autoplay
+      controls="false"
+      muted
+      height="400"
+      width="400"
+    ></video>
+
+    <h1>Remote stream</h1>
+    <video
+      id="recievedStream"
+      autoplay
+      controls="false"
+      muted
+      height="400"
+      width="400"
+    ></video>
+  </body>
+  <script>
+    let socket = io.connect();
+    let callButton = document.getElementById("call");
+    let cameraButton = document.getElementById("camera");
+    let localVideo = document.getElementById("localStream");
+    let recievedVide = document.getElementById("recievedStream");
+    let join = document.getElementById("join");
+    let number = document.getElementById("number");
+    let myPeerConnection = null;
+
+    let localStream = null;
+
+    callButton.addEventListener("click", openCamera);
+    cameraButton.addEventListener("click", openCamera);
+
+    join.addEventListener("click", function () {
+      socket.emit("start-call", number.value);
+    });
+
+    socket.on("offer-reply", handleOffer);
+    socket.on("candidate-reply", handleNewICECandidateMsg);
+    socket.on("le-offer", handleVideoOfferMsg);
+
+    function createPeerConnection() {
+      myPeerConnection = new RTCPeerConnection({
+        iceServers: [
+          // Information about ICE servers - Use your own!
+          {
+            urls: "stun:stun.stunprotocol.org",
+          },
+        ],
+      });
+
+      myPeerConnection.onicecandidate = handleICECandidateEvent;
+      myPeerConnection.ontrack = handleTrackEvent;
+      myPeerConnection.onnegotiationneeded = handleNegotiationNeededEvent;
+    }
+
+    async function openCamera() {
+      if (!myPeerConnection) {
+        createPeerConnection();
+      }
+      localStream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          cusor: "always",
+          displaySurface: "application",
+        },
+      });
+      localVideo.srcObject = localStream;
+
+      localStream
+        .getTracks()
+        .forEach((track) => myPeerConnection.addTrack(track, localStream));
+    }
+
+    function handleTrackEvent(event) {
+      recievedVide.srcObject = event.streams[0];
+    }
+
+    function handleNegotiationNeededEvent() {
+      myPeerConnection
+        .createOffer()
+        .then(function (offer) {
+          return myPeerConnection.setLocalDescription(offer);
+        })
+        .then(function () {
+          socket.emit("offer", myPeerConnection.localDescription);
+        })
+        .catch(console.log);
+    }
+
+    function handleOffer(msg) {
+      document.getElementById("meet").innerHTML = msg;
+    }
+
+    function handleVideoOfferMsg(offer) {
+      console.log(offer);
+      console.log("offer reached");
+      var localStream = null;
+      createPeerConnection();
+
+      var desc = new RTCSessionDescription(offer);
+
+      myPeerConnection
+        .setRemoteDescription(desc)
+        .then(function () {
+          return navigator.mediaDevices.getDisplayMedia({
+            video: {
+              cusor: "always",
+              displaySurface: "application",
+            },
+          });
+        })
+        .then(function (stream) {
+          localStream = stream;
+          localVideo.srcObject = localStream;
+
+          localStream
+            .getTracks()
+            .forEach((track) => myPeerConnection.addTrack(track, localStream));
+        })
+        .then(function () {
+          return myPeerConnection.createAnswer();
+        })
+        .then(function (answer) {
+          return myPeerConnection.setLocalDescription(answer);
+        })
+        .then(function () {
+          socket.emit("answer", myPeerConnection.localDescription);
+        })
+        .catch(console.log);
+    }
+
+    function handleICECandidateEvent(event) {
+      console.log("candidate event");
+      if (event.candidate) {
+        socket.emit("candidate", event.candidate);
+      }
+    }
+
+    function handleNewICECandidateMsg(msg) {
+      console.log(msg);
+      console.log("candidiate reached");
+      var candidate = new RTCIceCandidate(msg);
+
+      myPeerConnection.addIceCandidate(msg).catch(console.log);
+    }
+  </script>
+</html>
